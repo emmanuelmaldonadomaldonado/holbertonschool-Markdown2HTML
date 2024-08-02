@@ -1,92 +1,97 @@
 #!/usr/bin/python3
-""" Write a script markdown2html.py that takes an argument 2 strings:
-First argument is the name of the Markdown file
-Second argument is the output file name """
-
-import re
-import hashlib
 import sys
 import os
+import re
+import hashlib
+
+def replace_bold_emphasis(text):
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.*?)__', r'<em>\1</em>', text)
+    return text
+
+def convert_md5(text):
+    return hashlib.md5(text.encode()).hexdigest()
+
+def remove_c(text):
+    return re.sub(r'[cC]', '', text)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        sys.stderr.write("Usage: ./markdown2html.py README.md README.html\n")
+        print("Usage: ./markdown2html.py README.md README.html", file=sys.stderr)
         exit(1)
-    if not os.path.exists(sys.argv[1]):
-        sys.stderr.write("Missing " + sys.argv[1] + "\n")
+    md_file = sys.argv[1]
+    html_file = sys.argv[2]
+    
+    if not os.path.exists(md_file):
+        print(f"Missing {md_file}", file=sys.stderr)
         exit(1)
-
-    with open(sys.argv[1]) as r:
-        with open(sys.argv[2], 'w') as w:
-            change_status = False
-            ordered_status = False
-            paragraph = False
-            for line in r:
-                line = line.replace('**', '<b>', 1)
-                line = line.replace('**', '</b>', 1)
-                line = line.replace('__', '<em>', 1)
-                line = line.replace('__', '</em>', 1)
-
-                md5 = re.findall(r'\[\[.+?\]\]', line)
-                md5_inside = re.findall(r'\[\[(.+?)\]\]', line)
-                if md5:
-                    line = line.replace(md5[0], hashlib.md5(
-                        md5_inside[0].encode()).hexdigest())
-
-                delete_c = re.findall(r'\(\(.+?\)\)', line)
-                remove_c_inside = re.findall(r'\(\((.+?)\)\)', line)
-                if delete_c:
-                    remove_c_inside = ''.join(
-                        c for c in remove_c_inside[0] if c not in 'Cc')
-                    line = line.replace(delete_c[0], remove_c_inside)
-
-                length = len(line)
-                headings = line.lstrip('#')
-                heading_count = length - len(headings)
-                unordered = line.lstrip('-')
-                unordered_count = length - len(unordered)
-                ordered = line.lstrip('*')
-                ordered_count = length - len(ordered)
-
-                if 1 <= heading_count <= 6:
-                    line = '<h{}>'.format(
-                        heading_count) + headings.strip() + '</h{}>\n'.format(
-                        heading_count)
-
-                if unordered_count:
-                    if not change_status:
-                        w.write('<ul>\n')
-                        change_status = True
-                    line = '<li>' + unordered.strip() + '</li>\n'
-                if change_status and not unordered_count:
-                    w.write('</ul>\n')
-                    change_status = False
-
-                if ordered_count:
-                    if not ordered_status:
-                        w.write('<ol>\n')
-                        ordered_status = True
-                    line = '<li>' + ordered.strip() + '</li>\n'
-                if ordered_status and not ordered_count:
-                    w.write('</ol>\n')
-                    ordered_status = False
-
-                if not (heading_count or change_status or ordered_status):
-                    if not paragraph and length > 1:
-                        w.write('<p>\n')
-                        paragraph = True
-                    elif length > 1:
-                        w.write('<br/>\n')
-                    elif paragraph:
-                        w.write('</p>\n')
-                        paragraph = False
-
-                if length > 1:
-                    w.write(line)
-
-            if ordered_status:
-                w.write('</ol>\n')
-            if paragraph:
-                w.write('</p>\n')
-
+    
+    with open(md_file, 'r') as file:
+        lines = file.readlines()
+    
+    with open(html_file, 'w') as file:
+        in_ulist = False
+        in_olist = False
+        in_paragraph = False
+        for line in lines:
+            line = line.strip()
+            if not line:
+                if in_paragraph:
+                    file.write("</p>\n")
+                    in_paragraph = False
+                continue
+            
+            line = replace_bold_emphasis(line)
+            line = re.sub(r'\[\[(.*?)\]\]', lambda x: convert_md5(x.group(1)), line)
+            line = re.sub(r'\(\((.*?)\)\)', lambda x: remove_c(x.group(1)), line)
+            
+            if line.startswith('#'):
+                level = line.count('#')
+                line = line.lstrip('#').strip()
+                if in_paragraph:
+                    file.write("</p>\n")
+                    in_paragraph = False
+                file.write(f"<h{level}>{line}</h{level}>\n")
+            elif line.startswith('- '):
+                if not in_ulist:
+                    if in_paragraph:
+                        file.write("</p>\n")
+                        in_paragraph = False
+                    if in_olist:
+                        file.write("</ol>\n")
+                        in_olist = False
+                    file.write("<ul>\n")
+                    in_ulist = True
+                line = line.lstrip('- ').strip()
+                file.write(f"<li>{line}</li>\n")
+            elif line.startswith('* '):
+                if not in_olist:
+                    if in_paragraph:
+                        file.write("</p>\n")
+                        in_paragraph = False
+                    if in_ulist:
+                        file.write("</ul>\n")
+                        in_ulist = False
+                    file.write("<ol>\n")
+                    in_olist = True
+                line = line.lstrip('* ').strip()
+                file.write(f"<li>{line}</li>\n")
+            else:
+                if in_ulist:
+                    file.write("</ul>\n")
+                    in_ulist = False
+                if in_olist:
+                    file.write("</ol>\n")
+                    in_olist = False
+                if not in_paragraph:
+                    file.write("<p>\n")
+                    in_paragraph = True
+                file.write(f"{line}<br/>\n")
+        if in_paragraph:
+            file.write("</p>\n")
+        if in_ulist:
+            file.write("</ul>\n")
+        if in_olist:
+            file.write("</ol>\n")
+    
     exit(0)
